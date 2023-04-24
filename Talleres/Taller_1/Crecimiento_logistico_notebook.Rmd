@@ -8,7 +8,8 @@ Para simular y graficar utilizaremos los siguientes paquetes
 ```{r}
 # Nombre de los paquetes a utilizar
 packages <- c("ggplot2", "zoo", "primer",
-              "ggpubr", "lattice")
+              "ggpubr", "lattice", "phaseR",
+              "popbio")
 
 # Instalar paquetes
 installed_packages <- packages %in% rownames(installed.packages())
@@ -22,6 +23,8 @@ library(ggpubr)
 library(primer)
 library(zoo)
 library(lattice)
+library(phaseR)
+library(popbio)
 ```
 Podemos generar una función simple (en tiempo discreto) para proyectar el tamaño poblacional futuro incorporando los parámetros del modelo logístico.
 
@@ -73,6 +76,21 @@ inc_percapita
 
 ggarrange(crec_logistic, inc_percapita, inc_total)
 ```
+## Análisis de estabilidad, puntos de equilibrio
+
+Podemos buscar los puntos de equilibrio utilizando el paquete phaseR
+
+```{r}
+logisticPP <- phasePortrait(logistic, ylim = c(-5, 105), parameters = c(1, 100),
+                            ylab="Tasa de crecimiento poblacional (dN/dt)", xlab="N")
+N <- c(0, Nts[1:11])
+pop.growth.rate <- expression( N * (1 -  N/100) )
+points(N, eval(pop.growth.rate), cex=1.5)
+text(N, eval(pop.growth.rate), letters[1:12],adj=c(.5,2))
+
+```
+
+
 
 ## Efecto del tamaño inicial de la población
 
@@ -119,6 +137,8 @@ autoplot(zoo(N), facet = NULL) + geom_point() +
 ```
 
 ¿Qué efecto puedes notar al cambiar los valores de K?
+
+
 
 ## Efecto de lambda sobre el crecimiento poblacional
 
@@ -221,3 +241,28 @@ d_bif+
 ```
 
 ¿Qué puedes observar? ¿Qué significan las bifurcaciones que se observan? ¿Cómo se relaciona este diagrama de bifurcación con lo observado en los gráficos anteriores?
+
+## Diagramas de tela de araña
+
+Una forma de visualizar la estabilidad de un modelo poblacional es a través de un diagrama de tela de araña, el cual considera el tamaño actual de la población en el eje X y el tamaño en el tiempo siguiente en el eje Y.
+
+```{r}
+
+out <- dlogistic(N0=2, r=2.8, K=100, t=1000)
+n <- out[901:1000]
+ntp1 <- n[-1]
+nt <- n[-length(n)]
+qplot(nt, ntp1, geom=c("point", "path") ) + labs(y="N[t+1]", x="N[t]")+geom_abline(intercept = 0, slope = 1, color = "red")
+```
+
+¿Qué se observaría al utilizar tasas de crecimiento poblacional menores?
+¿Cómo sería este diagrama con los primeros 100 valores?
+
+## Actividad
+
+Utiliza el set de datos Grizzly contenido en el paquete popbio, calcula los valores de lambda, calcula un lambda promedio y utilizando un modelo logístico con capacidad de carga 100 y como tamaño inicial el tamaño inicial del set de datos Grizzly, genera los gráficos correspondientes del modelo e indica si se genera una dinámica discreta normal, con oscilaciones o caótica. Puedes repetir el proceso utilizando el valor de lambda más grande encontrado.
+
+```{r}
+grizzly <- popbio::grizzly
+```
+
