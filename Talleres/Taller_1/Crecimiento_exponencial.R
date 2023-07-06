@@ -23,6 +23,7 @@ library(primer)
 library(ggplot2)
 library(ggpubr)
 library(popbio)
+library(EcoVirtual)
 
 
 N <- c(1, 3, 9, 27, 81)
@@ -125,7 +126,7 @@ lamb= 1.5
 tmax= 10
 par(mfrow=c(1,1))
 popExp(N0, lamb, tmax, intt = 1)
-
+?popExp
 
 ## Otra métrica que podemos explorar además de r para analizar el crecimiento de una población
 ## es el tiempo en que se duplica su población, el cual se obtiene de:

@@ -1,0 +1,276 @@
+---
+title: "Poblaciones Estructuradas"
+output: html_notebook
+---
+
+Es posible describir el aumento poblacional de variados organismos al analizar este mediante el establecimiento de "estados", los que por ejemplo pueden estar definidos por el estado de desarrollo del organismo, su tamaño, etc.
+
+Para analizar las dinámicas poblacionales de estas poblaciones estructuradas y sus estados podemos recurrir al uso de matrices, en concreto al uso de la matriz de Leslie.
+
+Trabajaremos con una tabla de vida, para esto debemos indicar nuestro directorio de trabajo y cargar un archivo .csv (separado por comas) el cual contiene dicha tabla de vida.
+
+Primero descarguemos y carguemos los paquetes a utilizar durante el taller.
+
+```{r, message=FALSE}
+# Nombre de los paquetes a utilizar
+packages <- c("ggplot2", "popdemo", "readr", "dplyr",
+              "zoo", "igraph", "Rage", "readxl", "demogR")
+
+# Instalar paquetes
+installed_packages <- packages %in% rownames(installed.packages())
+if (any(installed_packages == FALSE)) {
+  install.packages(packages[!installed_packages])
+}
+
+library(popdemo)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(zoo)
+library(igraph)
+library(Rage)
+library(readxl)
+library(demogR)
+library(knitr)
+```
+
+Ahora si indicamos nuestro directorio de trabajo y cargamos el archivo con el cual trabajaremos.
+
+```{r}
+## Acá debes poner la ruta donde se encuentra tu archivo, nota que se utiliza el simbolo / para separar entre carpetas.
+setwd("C:/Users/jorge/OneDrive - Universidad de Chile/Cursos/EcoPob_2023/R_files/Ejercicios_EcoEvo/Talleres/Taller_2")
+
+
+life_table <- read_csv("Life_tab_2.csv")
+kable(life_table, caption = "Tabla de vida de ejemplo")
+```
+Esta tabla consta de cuatro columnas, "x" como los años, "N" como el tamaño poblacional, "lx" como la proporción de organismos vivos al iniciar el intervalo "x" y "mx" como la fecundidad.
+
+A partir de esta tabla de vida podemos calcular algunos parámetros demográficos de inteŕes como:
+
+$R0$, $T$ y $r$
+
+Para calcular estos parámetros y agregarlos a nuestra tabla de vida podemos utilizar el siguiente script:
+
+```{r}
+life_table <- life_table %>%
+  mutate("lx*mx"=lx*mx,
+         "x*lx*mx"=x*lx*mx,
+         "R0"=sum(lx*mx),
+         "T"=sum(x*lx*mx)/R0,
+         "approx.r"=log(R0)/T
+  )
+kable(life_table, caption = "Tabla de vida con parametros calculados")
+
+(sum(life_table$`x*lx*mx`))/1.28
+
+```
+
+También podemos obtener una curva de supervivencia al graficar lx en el tiempo:
+
+```{r}
+qplot(data=life_table, x, lx,
+      main ="Curva de supervivencia",
+      ylab = "lx",
+      xlab = "Edad",
+      colour=I("red"))+
+  geom_line()
+
+```
+Podemos seguir las ecuaciones del modelo de nacimiento pulsado con censo post-nacimiento para determinar las probabilidades de transición y fertilidad de la matriz de Leslie con el siguiente script:
+
+```{r}
+Gi <- life_table$lx[2:9]/life_table$lx[1:8]
+Fi <- Gi*life_table$mx[2:9]
+
+Gi
+Fi
+
+
+
+## Y con estos valores podemos construir la matriz de Leslie:
+
+A <- matrix(c(Fi[1], Fi[2], Fi[3], Fi[4], Fi[5], Fi[6], Fi[7], Fi[8], 
+              Gi[1], 0, 0, 0, 0, 0, 0, 0, 
+              0, Gi[2], 0, 0, 0, 0, 0, 0, 
+              0, 0, Gi[3], 0, 0, 0, 0, 0,
+              0, 0, 0, Gi[4], 0, 0, 0, 0,
+              0, 0, 0, 0, Gi[5], 0, 0, 0,
+              0, 0, 0, 0, 0, Gi[6], 0, 0,
+              0, 0, 0, 0, 0, 0, Gi[7], 0),
+            nr = 8, ncol = 8, byrow = TRUE)
+```
+Podemos crear una función para generar esta matriz a partir de cualquier Gi y Fi calculado:
+
+```{r}
+leslie_from_table <- function(Gi, Fi){
+    G_p <- c(rep(0, length(Gi)))
+    Vect <- c()
+    for(i in 1:length(Gi)) {
+      G_p[i]=Gi[i]
+      Vect <- append(Vect, G_p, after = length(Vect))
+      G_p <- c(rep(0, length(Gi)))
+    }
+  
+    total <- append(Fi, Vect, after = length(Fi))
+  
+    les_mat <- matrix(total, ncol = length(Gi), nrow=length(Gi), byrow = TRUE)
+  return(les_mat)
+}
+
+Mat <- leslie_from_table(Gi=Gi, Fi=Fi)
+
+Mat
+```
+Podemos graficar el ciclo de vida a partir de la matriz:
+
+```{r}
+plot_life_cycle(A, shape = "circle", edgecol = "red")
+```
+
+Si hemos cuantificado el número de individuos en cada clase, podemos construir un vector que contenga estos valores:
+
+```{r}
+N0 <- matrix(life_table$N[2:9], ncol = 1)
+
+## Teniendo estas matrices podemos multiplicarlas para obtener 
+## el tamaño futuro de la población, para cada clase:
+
+N1 <- A %*% N0
+N1
+```
+
+Podemos iterar esta operación para obtener los tamaños de las clases en el futuro:
+
+```{r}
+years <- 10
+N.projections <- matrix(0, nrow = nrow(A), ncol = years + 1)
+N.projections[, 1] <- N0
+
+for (i in 1:years) N.projections[, i + 1] <- A %*% N.projections[, i]
+
+N.projections
+
+N.projections_tr <- t(N.projections)
+
+colnames(N.projections_tr) <- c("Clase_1", "Clase_2", "Clase_3", 
+                                "Clase_4", "Clase_5", "Clase_6", 
+                                "Clase_7", "Clase 8")
+
+autoplot(zoo(N.projections_tr), facet = NULL) + 
+  geom_point()+
+  ggtitle(label = "Tamaño de cada clase en el tiempo")+
+  xlab(label = "Año")+
+  ylab(label = "N")
+
+```
+
+Otra posibilidad que tenemos es poder identificar el estado estable:
+
+```{r}
+## Estado estable
+
+N.totals <- apply(N.projections, 2, sum)
+
+N.pond <- matrix(0, nrow = nrow(A), ncol = years + 1)
+
+for(i in 1:years+1) N.pond[,i] <- N.projections[,i]/N.totals[i]
+
+N.pond
+
+N.pond_tr <- t(N.pond)
+
+colnames(N.pond_tr) <- c("Clase_1", "Clase_2", "Clase_3", 
+                          "Clase_4", "Clase_5", "Clase_6", 
+                         "Clase_7", "Clase_8")
+
+autoplot(zoo(N.pond_tr), facet = NULL) + 
+  geom_point()+
+  ggtitle(label = "Proporción de cada clase en el tiempo")+
+  xlab(label = "Año")+
+  ylab(label = "N/Ntotal")
+```
+
+También podríamos calcular la tasa de crecimiento:
+
+```{r}
+N.totals <- apply(N.projections, 2, sum)
+
+Rs <- N.totals[-1]/N.totals[-(years + 1)]
+
+par(mfrow=c(1,1))
+Ye <- 0:9
+qplot(Ye, Rs, geom = c("point","line")
+      ,colour = I("blue"),
+      xlab = "Años",
+      ylab = "R",
+      main = "Tasa de crecimiento anual")
+```
+
+También es posible realizar análisis de los valores y vectores propios contenidos en la matriz (eigen análisis), lo que en definitiva permite obtener el valor de la tasa de crecimiento finita.
+
+```{r}
+eigs.A <- eigen(A)
+eigs.A
+
+dom.pos <- which.max(eigs.A[["values"]])
+L1 <- Re(eigs.A[["values"]][dom.pos])
+L1
+```
+
+El primer valor propio (alredor de 1.07) corresponde a la tasa finita de crecimiento.Otra forma de obtener este valor es realizando iteraciones múltiples de la matriz por un largo período de tiempo y el valor de R se acercará al valor de la tasa finita de crecimiento.
+
+```{r}
+years <- 100
+N.projections <- matrix(0, nrow = nrow(A), ncol = years + 1)
+N.projections[, 1] <- N0
+
+for (i in 1:years) N.projections[, i + 1] <- A %*% N.projections[, i]
+
+N.totals <- apply(N.projections, 2, sum)
+
+Rs <- N.totals[-1]/N.totals[-(years + 1)]
+
+par(mfrow=c(1,1))
+Ye <- 0:99
+qplot(Ye, Rs, geom = c("point","line")
+      ,colour = I("blue"),
+      xlab = "Años",
+      ylab = "R",
+      main = "Tasa de crecimiento anual")
+
+```
+Podemos también evaluar la sensibilidad y la elasticidad de las fecundidades y las probabilidades de transición:
+
+```{r}
+sens(A, eval = "max", all = T)
+elasticidad_A <- elas(A, eval = "max")
+```
+## Ejercicio
+
+Se tienen dos matrices para Vulpes vulpes extraídas de COMADRE. La primera matriz (vulpes_haunt) corresponde a una población bajo caza intensiva, mientras que vulpes_unman corresponde a una situación control. A partir de las matrices genere el grafo del ciclo de vida para cada una, calcule la tasa de crecimiento, encuentre el estado estable y la proporción de cada clase y genere una proyección a 10 años de cada matriz y haga un análisis de elasticidad.
+
+A partir de esto genere sus propias conclusiones.
+
+```{r}
+vulpes_haunt <- matrix(c(0.37, 0.61, 1.21, 1.58,
+                       0.3, 0, 0, 0,
+                       0, 0.35, 0, 0,
+                       0, 0, 0.57, 0.7), ncol = 4, nrow = 4,
+                       byrow = TRUE)
+
+vulpes_unman <- matrix(c(0.686, 1.271, 1.426, 0.332,
+                         0.39, 0, 0, 0,
+                         0, 0.65, 0, 0,
+                         0, 0, 0.92, 0.18), ncol = 4, nrow = 4,
+                       byrow = TRUE)
+```
+
+## Bonus
+En los archivos entregados encontrará una tabla de vida de Gorilla (Gorilla_lt), transformela a matriz. Analice la matriz según lo aprendido en esta sesión.
+
+```{r}
+Gorilla <- read_xlsx("Gorilla_lt.xlsx", sheet = "Hoja1")
+```
+
+
