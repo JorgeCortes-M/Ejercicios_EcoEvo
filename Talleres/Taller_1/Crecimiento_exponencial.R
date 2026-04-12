@@ -2,44 +2,35 @@
 ### CRECIMIENTO DENSO-INDEPENDIENTE DISCRETO ###
 ################################################
 
-##Crecimiento poblacional de Nymphaea odorata a través de los años##
+# Paquetes necesarios para el taller
+packages <- c("ggplot2", "ggpubr", "EcoVirtual", "popbio", "deSolve")
 
-#install.packages("primer")
-#install.packages("ggplot2")
-#install.packages("ggpubr")
-
-# Nombre de los paquetes a utilizar
-packages <- c("ggplot2", "primer",
-              "ggpubr", "EcoVirtual", "popbio")
-
-# Instalar paquetes
 installed_packages <- packages %in% rownames(installed.packages())
-if (any(installed_packages == FALSE)) {
+if (any(!installed_packages)) {
   install.packages(packages[!installed_packages])
 }
 
-
-library(primer)
 library(ggplot2)
 library(ggpubr)
-library(popbio)
 library(EcoVirtual)
+library(popbio)
+library(deSolve)
 
 
 N <- c(1, 3, 9, 27, 81)
 year <- 2001:2005
-qplot(year, N, 
-      xlab = "Año", 
-      ylab = "N", 
-      main = "Conteo por año de N. odorata", 
-      colour=I("Red"))
+
+ggplot(data.frame(year, N), aes(x = year, y = N)) +
+  geom_point(color = "red", size = 3) +
+  labs(x = "Año", y = "N", title = "Conteo por año de N. odorata")
+
 ##calculamos las tasas de crecimiento dividiendo cada número deindividuos de un año por el número
 ##de inviduos del año anterior: lambda = Nt+1/Nt
 
 rates = N[2:5]/N[1:4] #divide cada valor de N por el valor anterior
 rates
 
-## teniendo esto en cuenta podríamos escribir un modelo denso independiente sencillo
+## tenienendo esto en cuenta podríamos escribir un modelo denso independiente sencillos
 ## Nt = lambda^t * N0, para este caso lambda es igual a 3. (tasa finita de crecimiento)
 ## Damos parametros iniciales a nuestro modelo
 
@@ -49,11 +40,10 @@ time <- 0:10
 
 Nt <- N0*lambda^time
 
-qplot(time, Nt, 
-      main = "Modelo denso independiente discreto",
-      xlab = "Tiempo", 
-      ylab = "N", 
-      colour=I("Blue"))
+ggplot(data.frame(time, Nt), aes(x = time, y = Nt)) +
+  geom_line(color = "blue", linewidth = 1) +
+  geom_point(color = "blue", size = 2) +
+  labs(x = "Tiempo", y = "N", title = "Modelo denso independiente discreto")
 
 ## Exploremos el efecto del tamaño inicial de la población
 
@@ -134,22 +124,19 @@ popExp(N0, lamb, tmax, intt = 1)
 
 ## Creamos una función para explorar esto:
 
-m.time <- function(r, m = 2) {
-  log(m)/r
+doubling_time <- function(r, m = 2) {
+  ifelse(r > 0, log(m)/r, NA)
 }
 
-rs <- c(0, 0.1, 0.5, 1, 2)
-times <- m.time(rs)
+rs <- c(0.01, 0.1, 0.5, 1, 2)
+times <- doubling_time(rs)
 
-qplot(x = rs, y = times,
-      colour = "red",
-      size = 2.0)+
-  geom_line(size=1.0)+
-  ggtitle("Tiempo en que se duplica una población en función de r")+
-    theme(
-      legend.position = "none",
-      plot.title = element_text(hjust = 0.5)
-    )
+ggplot(data.frame(rs, times), aes(x = rs, y = times)) +
+  geom_point(color = "red", size = 3) +
+  geom_line(color = "red", linewidth = 1) +
+  labs(x = "Tasa de crecimiento (r)", y = "Tiempo de duplicación", 
+       title = "Tiempo de duplicación en función de r") +
+  theme_bw()
 
 ##ANEXO
 
@@ -157,12 +144,10 @@ qplot(x = rs, y = times,
 ### CRECIMIENTO DENSO-INDEPENDIENTE CONTINUO ###
 ################################################
 
-##Actividad
-
-## El crecimiento denso-independiente o exponenial continuo puede ser modelado por la ecuaci?n:
-##                       Nt = N0e^(rt)
-## Esta ecuaci?n puede ser obtenida de la resolución de un límite (ver en Anexo)
-## Podemos proyectar en el tiempo la población tal como hicimos con el modelo en su forma discreta:
+## El crecimiento denso-independiente o exponencial continuo puede ser modelado por la ecuación:
+##                       dN/dt = rN
+## Cuya solución analítica es: Nt = N0*e^(rt)
+## Esta ecuación puede ser obtenida de la resolución de un límite
 
 ## Escogemos 5 tasas de crecimiento (r) y un intervalo de tiempo de 1 a 100
 
@@ -174,7 +159,7 @@ cont.mat <- sapply(r, function(ri) N0 * exp(ri * t))
 
 layout(matrix(1:2, nrow = 1))
 matplot(t, cont.mat, type = "l", 
-        main = "Crecimiento exp. continuo",
+        main = "Crecimiento exponencial continuo",
         xlab = "Tiempo",
         ylab = "N", 
         col = 6)
@@ -192,25 +177,25 @@ matplot(t, cont.mat, type = "l",
 ## Hasta ahora hemos utilizado tasas fijas de lambda, pero este valor podría cambiar en cada año
 ## podríamos tomar por ejemplo la media aritmética de los distintos valores de lambda
 ## o podríamos tomar la media geométrica, a continuación las comparamos.
-## usaremos el set de datos sparrows contenidos en el paquete primer
+## Usaremos datos de un ejemplo de población de passeriformes:
 
-data(sparrows)
-str(sparrows)
-attach(sparrows)
-qplot(x = Year, y = Count, data = sparrows, 
-      xlab = "A?o",
-      ylab = "Conteo",
-      geom = "point", 
-      colour=I("Blue"),
-      main = "Conteo de Melospiza melodia")
+sparrows <- data.frame(
+  Year = 2001:2006,
+  Count = c(50, 65, 89, 115, 150, 195)
+)
+
+ggplot(sparrows, aes(x = Year, y = Count)) +
+  geom_point(color = "blue", size = 3) +
+  geom_line(color = "blue") +
+  labs(x = "Año", y = "Conteo", title = "Conteo de Passeriformes")
 
 
-##usaremos 6 valores observados de R de los datos sparrows
+##usaremos 6 valores observados de R de los datos de sparrows:
 
 t <- 5
 SS6 <- sparrows[1:(t + 1), ]
 
-#Calculamos los valores de lambda para cada intervalo y calculamos media aritm?tica y geom?trica.
+#Calculamos los valores de lambda para cada intervalo y calculamos media aritmética y geométrica.
 
 SSgr <- SS6$Count[2:(t + 1)]/SS6$Count[1:t]
 lam.A <- sum(SSgr)/t
@@ -239,7 +224,8 @@ ggplot(data_fin, aes(x = Year, y = Count)) +
        color="Legend")+
   scale_color_manual(values = colors)
 
-##A partir de estos resultados, averigua en qué se diferencia la media aritmética y la media geométrica.
+## A partir de estos resultados, averigua en qué se diferencia la media aritmética y la media geométrica.
+## Pregunta: ¿Por qué la media geométrica es más apropiada para tasas de crecimiento?
 
 ## Actividad
 ## A continuación se encuentran los datos de crecimiento poblacional de
