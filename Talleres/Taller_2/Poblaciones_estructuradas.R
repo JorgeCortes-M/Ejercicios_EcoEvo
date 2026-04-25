@@ -1,272 +1,530 @@
 ############################################################################
-#################### POBLACIONES ESTRUCTURADAS #############################
+##              POBLACIONES ESTRUCTURADAS: MATRICES DEMOGRAFICAS          ##
+############################################################################
+##
+## Es posible describir la dinamica poblacional de variados organismos al
+## clasificar a sus individuos en "estados" (clases de edad, etapas de
+## desarrollo, tallas, etc.) y modelar las transiciones entre ellos usando
+## matrices de proyeccion.
+##
+## Este script cubre:
+##   1. Tablas de vida y parametros demograficos (R0, T, r, lambda)
+##   2. Construccion de la Matriz de Leslie (por edad)
+##   3. Proyecciones poblacionales
+##   4. Eigenanalisis completo: lambda, w, v, rho
+##   5. Sensibilidad y elasticidad
+##   6. Matrices de Lefkovitch (por etapa)
+##   7. Ejercicio: Vulpes vulpes + LTRE
+##
+## INSTRUCCION: todos los archivos de datos deben estar en la misma
+## carpeta que este script. No es necesario definir setwd().
+############################################################################
 
-## Es posible describir el aumento poblacional de variados organismos al analizar este
-## mediante el establecimiento de "estados", los que por ejemplo pueden estar definidos
-## por el estado de desarrollo del organismo, su tamaño, etc.
-## Para analizar las dinámicas poblacionales de estas poblaciones estructuradas y sus estados
-## podemos recurrir al uso de matrices, en concreto al uso de la matriz de Leslie.
 
-## Trabajaremos con una tabla de vida, 
-## para esto debemos indicar nuestro directorio de trabajo y cargar un archivo .csv (separado por comas)
-## el cual contiene dicha tabla de vida.
+## ---- 1. PAQUETES --------------------------------------------------------
 
-## install.packages("popdemo")
-## install.packages("readr")
-## install.packages("dplyr")
-## install.packages("ggplot2")
-## install.packages("zoo")
-## install.packages("igraph")
-## install.packages("readxl")
-## install.packages("demogR")
+packages <- c("ggplot2", "popdemo", "readr", "dplyr", "tidyr",
+              "igraph", "Rage", "readxl", "knitr")
 
-# Nombre de los paquetes a utilizar
-packages <- c("ggplot2", "popdemo", "readr", "dplyr",
-              "zoo", "igraph", "Rage", "readxl", "demogR")
-
-# Instalar paquetes
 installed_packages <- packages %in% rownames(installed.packages())
-if (any(installed_packages == FALSE)) {
+if (any(!installed_packages)) {
   install.packages(packages[!installed_packages])
 }
 
 library(popdemo)
 library(readr)
 library(dplyr)
+library(tidyr)
 library(ggplot2)
-library(zoo)
 library(igraph)
 library(Rage)
 library(readxl)
-library(demogR)
+library(knitr)
 
 
+## ---- 2. TABLA DE VIDA ---------------------------------------------------
 
-## Acá debes poner la ruta donde se encuentra tu archivo, nota que se utiliza el simbolo / para separar entre carpetas.
-setwd("C:/Users/jorge/OneDrive - Universidad de Chile/Cursos/EcoPob_2023/R_files/Ejercicios_EcoEvo/Talleres/Taller_2")
-
-life_table <- read_csv(file.choose())
-
-life_table <- read_csv("Life_tab_2.csv")
+## Columnas: x (edad), N (abundancia), lx (supervivencia), mx (fecundidad)
+life_table <- read_csv("Life_tab_2.csv", show_col_types = FALSE)
 life_table
 
 
-## A partir de esta tabla de vida podemos calcular algunos parámetros demográficos de inteŕes como:
-## R0, T y r
-## Para calcular estos parámetros y agregarlos a nuestra tabla de vida 
-## podemos utilizar el siguiente script:
+## ---- 3. PARAMETROS DEMOGRAFICOS -----------------------------------------
 
+## R0: tasa neta de reproduccion      = sum(lx * mx)
+## T:  tiempo generacional            = sum(x * lx * mx) / R0
+## r:  tasa intrinseca de incremento  = ln(R0) / T
+## lambda = e^r  (tasa finita de crecimiento)
+
+R0_val <- sum(life_table$lx * life_table$mx)
+T_val  <- sum(life_table$x * life_table$lx * life_table$mx) / R0_val
+r_val  <- log(R0_val) / T_val
+
+cat("R0     =", round(R0_val, 4), "\n")
+cat("T      =", round(T_val,  4), "anos\n")
+cat("r      =", round(r_val,  4), "por ano\n")
+cat("lambda = e^r =", round(exp(r_val), 4), "\n\n")
+
+## Verificacion de la relacion R0 - lambda - T:
+cat("R0 desde lambda y T: lambda^T =", round(exp(r_val)^T_val, 4),
+    " | R0 observado =", round(R0_val, 4), "\n")
+
+## Agregar columnas auxiliares a la tabla
 life_table <- life_table %>%
-  mutate("lx*mx"=lx*mx,
-         "x*lx*mx"=x*lx*mx,
-         "R0"=sum(lx*mx),
-         "T"=sum(x*lx*mx)/R0,
-         "approx.r"=log(R0)/T
+  mutate(
+    lx_mx   = lx * mx,
+    x_lx_mx = x  * lx * mx
   )
+
 life_table
 
-(sum(life_table$`x*lx*mx`))/1.28
 
-## También podemos obtener una curva de supervivencia al graficar lx en el tiempo:
+## ---- 4. CURVA DE SUPERVIVENCIA ------------------------------------------
 
-qplot(data=life_table, x, lx,
-      main ="Curva de supervivencia",
-      ylab = "lx",
-      xlab = "Edad",
-      colour=I("red"))+
-  geom_line()
-
-## Podemos seguir las ecuaciones del modelo de nacimiento pulsado con censo post-nacimiento 
-## para determinar las probabilidades de paso y fertilidad de la matriz de Leslie 
-## con el siguiente script:
-
-Gi <- life_table$lx[2:9]/life_table$lx[1:8]
-Fi <- Gi*life_table$mx[2:9]
-
-Gi
-Fi
+ggplot(life_table, aes(x = x, y = lx)) +
+  geom_line(color = "firebrick", linewidth = 1) +
+  geom_point(color = "firebrick", size = 2.5) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    title = "Curva de supervivencia",
+    x     = "Clase de edad (x)",
+    y     = "lx"
+  ) +
+  theme_classic(base_size = 13)
 
 
+## ---- 5. MATRIZ DE LESLIE ------------------------------------------------
 
-## Y con estos valores podemos construir la matriz de Leslie:
+## Modelo de nacimiento pulsado con censo post-nacimiento:
+##   Gi = lx[i+1] / lx[i]       probabilidad de supervivencia
+##   Fi = Gi * mx[i+1]           fertilidad de la clase i
 
-A <- matrix(c(Fi[1], Fi[2], Fi[3], Fi[4], Fi[5], Fi[6], Fi[7], Fi[8], 
-              Gi[1], 0, 0, 0, 0, 0, 0, 0, 
-              0, Gi[2], 0, 0, 0, 0, 0, 0, 
-              0, 0, Gi[3], 0, 0, 0, 0, 0,
-              0, 0, 0, Gi[4], 0, 0, 0, 0,
-              0, 0, 0, 0, Gi[5], 0, 0, 0,
-              0, 0, 0, 0, 0, Gi[6], 0, 0,
-              0, 0, 0, 0, 0, 0, Gi[7], 0),
-            nr = 8, ncol = 8, byrow = TRUE)
+n  <- nrow(life_table)
+lx <- life_table$lx
+mx <- life_table$mx
 
-## Podemos crear una función para generar esta matriz a partir de cualquier Gi y Fi calculado
+Gi <- lx[2:n] / lx[1:(n - 1)]
+Fi <- Gi * mx[2:n]
 
-leslie_from_table <- function(Gi, Fi){
-    G_p <- c(rep(0, length(Gi)))
-    Vect <- c()
-    for(i in 1:length(Gi)) {
-      G_p[i]=Gi[i]
-      Vect <- append(Vect, G_p, after = length(Vect))
-      G_p <- c(rep(0, length(Gi)))
-    }
-  
-    total <- append(Fi, Vect, after = length(Fi))
-  
-    les_mat <- matrix(total, ncol = length(Gi), nrow=length(Gi), byrow = TRUE)
-  return(les_mat)
+data.frame(Clase = seq_len(n - 1), Gi = round(Gi, 4), Fi = round(Fi, 4))
+
+
+## Funcion para construir la Matriz de Leslie a partir de Gi y Fi
+
+leslie_from_table <- function(Gi, Fi) {
+  n <- length(Gi)
+  A <- matrix(0, nrow = n, ncol = n)
+  A[1, ] <- Fi                                      # primera fila: fertilidades
+  for (i in seq_len(n - 1)) A[i + 1, i] <- Gi[i]  # subdiagonal: supervivencias
+  A
 }
 
-Mat <- leslie_from_table(Gi=Gi, Fi=Fi)
-
-Mat
-
-## Podemos graficar el ciclo de vida a partir de la matriz
-
-plot_life_cycle(A, shape = "circle", edgecol = "red")
-plot_life_cycle(Mat, shape = "circle", edgecol = "red")
+A <- leslie_from_table(Gi, Fi)
+round(A, 4)
 
 
+## Grafo del ciclo de vida
+plot_life_cycle(A, shape = "circle", edgecol = "firebrick")
 
 
-## Si hemos cuantificado el número de individuos en cada clase, podemos construir
-## un vector que contenga estos valores:
+## ---- 6. PROYECCIONES POBLACIONALES --------------------------------------
 
-N0 <- matrix(life_table$N[2:9], ncol = 1)
+## Funcion de proyeccion reutilizable para cualquier matriz y horizonte temporal
 
-## Teniendo estas matrices podemos multiplicarlas para obtener 
-## el tamaño futuro de la población, para cada clase:
+proyectar <- function(A, N0, anos) {
+  n <- nrow(A)
+  N <- matrix(0, nrow = n, ncol = anos + 1)
+  N[, 1] <- N0
+  for (t in seq_len(anos)) N[, t + 1] <- A %*% N[, t]
+  N
+}
 
-N1 <- A %*% N0
-N1
-
-
-## Podemos iterar esta operación para obtener los tamaños de las clases en el futuro:
-
+## Vector inicial de abundancias (excluye la fila de edad 0)
+N0    <- as.numeric(life_table$N[-1])
 years <- 10
-N.projections <- matrix(0, nrow = nrow(A), ncol = years + 1)
-N.projections[, 1] <- N0
 
-for (i in 1:years) N.projections[, i + 1] <- A %*% N.projections[, i]
+N_proj <- proyectar(A, N0, years)
 
-N.projections
+## Proyeccion por clase
+N_df <- as.data.frame(t(N_proj))
+colnames(N_df) <- paste0("Clase_", seq_len(nrow(A)))
+N_df$Ano <- 0:years
 
-N.projections_tr <- t(N.projections)
-
-colnames(N.projections_tr) <- c("Clase_1", "Clase_2", "Clase_3", 
-                                "Clase_4", "Clase_5", "Clase_6", 
-                                "Clase_7", "Clase 8")
-
-autoplot(zoo(N.projections_tr), facet = NULL) + 
-  geom_point()+
-  ggtitle(label = "Tamaño de cada clase en el tiempo")+
-  xlab(label = "Año")+
-  ylab(label = "N")
-
-## Estado estable
-
-N.totals <- apply(N.projections, 2, sum)
-
-N.pond <- matrix(0, nrow = nrow(A), ncol = years + 1)
-
-for(i in 1:years+1) N.pond[,i] <- N.projections[,i]/N.totals[i]
-
-N.pond
-
-N.pond_tr <- t(N.pond)
-
-colnames(N.pond_tr) <- c("Clase_1", "Clase_2", "Clase_3", 
-                          "Clase_4", "Clase_5", "Clase_6", 
-                         "Clase_7", "Clase_8")
-
-autoplot(zoo(N.pond_tr), facet = NULL) + 
-  geom_point()+
-  ggtitle(label = "Proporción de cada clase en el tiempo")+
-  xlab(label = "Año")+
-  ylab(label = "N/Ntotal")
-
-## Con estas proyecciones podemos calcular la tasa de crecimiento anual de la población:
-
-N.totals <- apply(N.projections, 2, sum)
-
-Rs <- N.totals[-1]/N.totals[-(years + 1)]
-
-par(mfrow=c(1,1))
-Ye <- 0:9
-qplot(Ye, Rs, geom = c("point","line")
-      ,colour = I("blue"),
-      xlab = "Años",
-      ylab = "R",
-      main = "Tasa de crecimiento anual")
-
-## También es posible realizar análisis de los valores y vectores propios 
-## contenidos en la matriz (eigen análisis), lo que en definitiva permite obtener el valor de la tasa de crecimiento finita.
-
-eigs.A <- eigen(A)
-eigs.A
-
-dom.pos <- which.max(eigs.A[["values"]])
-L1 <- Re(eigs.A[["values"]][dom.pos])
-L1
-
-## El primer valor propio (alredor de 1.07) corresponde a la tasa finita de crecimiento.
-## Otra forma de obtener este valor es realizando iteraciones múltiples de la matriz por 
-## un largo período de tiempo y el valor de R se acercará al valor de la tasa finita de crecimiento.
-
-years <- 100
-N.projections <- matrix(0, nrow = nrow(A), ncol = years + 1)
-N.projections[, 1] <- N0
-
-for (i in 1:years) N.projections[, i + 1] <- A %*% N.projections[, i]
-
-N.totals <- apply(N.projections, 2, sum)
-
-Rs <- N.totals[-1]/N.totals[-(years + 1)]
-
-par(mfrow=c(1,1))
-Ye <- 0:99
-qplot(Ye, Rs, geom = c("point","line")
-      ,colour = I("blue"),
-      xlab = "Años",
-      ylab = "R",
-      main = "Tasa de crecimiento anual")
-
-Rs[length(Rs)]
-
-## Podemos también evaluar la sensibilidad y la elasticidad de las fecundidades 
-## y las probabilidades de transición:
-
-sens(A, eval = "max", all = T)
-elasticidad_A <- elas(A, eval = "max")
+pivot_longer(N_df, cols = -Ano, names_to = "Clase", values_to = "N") %>%
+  ggplot(aes(x = Ano, y = N, color = Clase)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 1.5) +
+  labs(
+    title = "Proyeccion poblacional por clase de edad",
+    x     = "Ano",
+    y     = "Numero de individuos"
+  ) +
+  theme_classic(base_size = 13)
 
 
+## Distribucion estable de edades (proporciones)
+N_totals <- colSums(N_proj)
+N_prop   <- sweep(N_proj, 2, N_totals, "/")
 
-## Ejercicio
+N_prop_df <- as.data.frame(t(N_prop))
+colnames(N_prop_df) <- paste0("Clase_", seq_len(nrow(A)))
+N_prop_df$Ano <- 0:years
 
-## Se tienen dos matrices para Vulpes vulpes extraídas de COMADRE
-## La primera matriz (vulpes_haunt) corresponde a una población
-## bajo caza intensiva, mientras que vulpes_unman corresponde a una situación control
-## A partir de las matrices genere el grafo del ciclo de vida para cada una
-## Calcule la tasa de crecimiento para cada una, encuentre el estado estable y la proporción de cada clase
-## Haga una proyección a 10 años de cada matriz y haga un análisis de elasticidad.
-## A partir de esto genere sus propias conclusiones.
+pivot_longer(N_prop_df, cols = -Ano, names_to = "Clase", values_to = "Proporcion") %>%
+  ggplot(aes(x = Ano, y = Proporcion, color = Clase)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 1.5) +
+  labs(
+    title = "Convergencia a la distribucion estable de edades",
+    x     = "Ano",
+    y     = "Proporcion (N / N_total)"
+  ) +
+  theme_classic(base_size = 13)
 
 
-vulpes_haunt <- matrix(c(0.37, 0.61, 1.21, 1.58,
-                       0.3, 0, 0, 0,
-                       0, 0.35, 0, 0,
-                       0, 0, 0.57, 0.7), ncol = 4, nrow = 4,
-                       byrow = TRUE)
+## ---- 7. EIGENANALISIS ---------------------------------------------------
 
-vulpes_unman <- matrix(c(0.686, 1.271, 1.426, 0.332,
-                         0.39, 0, 0, 0,
-                         0, 0.65, 0, 0,
-                         0, 0, 0.92, 0.18), ncol = 4, nrow = 4,
-                       byrow = TRUE)
+eigs_A  <- eigen(A)
+dom_pos <- which.max(Re(eigs_A$values))
 
-## Bonus
-## En los archivos entregados encontrará una tabla de vida de Gorilla (Gorilla_lt), transformela a matriz
-## Analice la matriz según lo aprendido en esta sesión.
+## lambda1: eigenvalor dominante = tasa finita de crecimiento
+lambda1 <- Re(eigs_A$values[dom_pos])
+
+## w: eigenvector derecho = distribucion estable de edades
+w      <- Re(eigs_A$vectors[, dom_pos])
+w_norm <- w / sum(w)
+
+## v: eigenvector izquierdo = valor reproductivo relativo
+eigs_left <- eigen(t(A))
+dom_pos_l <- which.max(Re(eigs_left$values))
+v         <- Re(eigs_left$vectors[, dom_pos_l])
+v_norm    <- v / v[1]   # normalizar: clase 1 = 1
+
+## rho: ratio de amortiguamiento = velocidad de convergencia al estado estable
+lambda2 <- sort(Mod(eigs_A$values), decreasing = TRUE)[2]
+rho     <- lambda1 / lambda2
+
+cat("lambda1 =", round(lambda1, 6), "\n")
+cat("r       =", round(log(lambda1), 6), "por ano\n")
+cat("rho     =", round(rho, 4), "\n\n")
+
+data.frame(
+  Clase             = paste0("Clase_", seq_len(nrow(A))),
+  w_estable         = round(w_norm, 4),
+  v_reproductivo    = round(v_norm, 4)
+)
+
+
+## Distribucion estable de edades
+ggplot(data.frame(Clase = paste0("Clase_", seq_along(w_norm)), Proporcion = w_norm),
+       aes(x = Clase, y = Proporcion)) +
+  geom_col(fill = "steelblue", alpha = 0.85) +
+  labs(title = "Distribucion estable de edades (w)",
+       x = "Clase de edad", y = "Proporcion") +
+  theme_classic(base_size = 13)
+
+## Valor reproductivo
+ggplot(data.frame(Clase = paste0("Clase_", seq_along(v_norm)), ValorReprod = v_norm),
+       aes(x = Clase, y = ValorReprod)) +
+  geom_col(fill = "coral3", alpha = 0.85) +
+  labs(title = "Valor reproductivo relativo (v)",
+       subtitle = "Relativo a la Clase 1 = 1",
+       x = "Clase de edad", y = "Valor reproductivo") +
+  theme_classic(base_size = 13)
+
+
+## Convergencia de lambda_t hacia lambda1 en proyeccion larga
+
+years_conv <- 100
+N_conv     <- proyectar(A, N0, years_conv)
+N_tot_conv <- colSums(N_conv)
+Rs_conv    <- N_tot_conv[-1] / N_tot_conv[-(years_conv + 1)]
+
+ggplot(data.frame(Ano = seq_len(years_conv), Lambda_t = Rs_conv),
+       aes(x = Ano, y = Lambda_t)) +
+  geom_line(color = "steelblue", linewidth = 0.8) +
+  geom_point(color = "steelblue", size = 0.8) +
+  geom_hline(yintercept = lambda1, color = "firebrick",
+             linetype = "dashed", linewidth = 1) +
+  annotate("text", x = 80, y = lambda1 + 0.004,
+           label = paste0("lambda1 = ", round(lambda1, 4)),
+           color = "firebrick", size = 4) +
+  labs(
+    title = "Convergencia de la tasa de crecimiento anual hacia lambda1",
+    x     = "Ano de proyeccion",
+    y     = "lambda_t = N(t+1) / N(t)"
+  ) +
+  theme_classic(base_size = 13)
+
+
+## ---- 8. SENSIBILIDAD Y ELASTICIDAD --------------------------------------
+
+## Sensibilidad: cambio absoluto en lambda1 ante cambio absoluto en a_ij
+S <- sens(A, eval = "max")
+
+as.data.frame(S) %>%
+  setNames(paste0("Clase_", seq_len(ncol(S)))) %>%
+  mutate(Origen = paste0("Clase_", seq_len(nrow(S)))) %>%
+  pivot_longer(cols = -Origen, names_to = "Destino", values_to = "Sensibilidad") %>%
+  ggplot(aes(x = Destino, y = Origen, fill = Sensibilidad)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Sensibilidad de lambda1",
+       x = "Destino (columna)", y = "Origen (fila)") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+## Elasticidad: cambio proporcional en lambda1 ante cambio proporcional en a_ij
+## Propiedad clave: los valores de elasticidad siempre suman 1
+E <- elas(A, eval = "max")
+
+as.data.frame(E) %>%
+  setNames(paste0("Clase_", seq_len(ncol(E)))) %>%
+  mutate(Origen = paste0("Clase_", seq_len(nrow(E)))) %>%
+  pivot_longer(cols = -Origen, names_to = "Destino", values_to = "Elasticidad") %>%
+  ggplot(aes(x = Destino, y = Origen, fill = Elasticidad)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "coral3") +
+  labs(title = "Elasticidad de lambda1",
+       x = "Destino (columna)", y = "Origen (fila)") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+cat("Suma de elasticidades:", round(sum(E), 6), "(debe ser = 1)\n")
+
+
+## ---- 9. MATRIZ DE LEFKOVITCH (por etapa) --------------------------------
+
+## A diferencia de la Matriz de Leslie, la de Lefkovitch permite:
+##   - Permanencia en la misma etapa (elementos en la diagonal principal)
+##   - Clasificacion por etapa de desarrollo en vez de por edad exacta
+## Es la forma mas comun en estudios empiricos de plantas, reptiles y peces.
+
+## Ejemplo: planta perenne con 3 etapas (Plantula, Juvenil, Adulto)
+
+etapas <- c("Plantula", "Juvenil", "Adulto")
+
+B <- matrix(
+  c(0.000, 0.000, 4.500,
+    0.250, 0.350, 0.000,
+    0.000, 0.550, 0.750),
+  nrow = 3, ncol = 3, byrow = TRUE,
+  dimnames = list(etapas, etapas)
+)
+
+## Interpretacion:
+##   B[1,3] = 4.5:  cada adulto produce 4.5 plantulas/anio
+##   B[2,1] = 0.25: 25% de plantulas maduran a juvenil
+##   B[2,2] = 0.35: 35% de juveniles permanecen como juveniles
+##   B[3,2] = 0.55: 55% de juveniles maduran a adulto
+##   B[3,3] = 0.75: 75% de adultos sobreviven y permanecen como adultos
+
+round(B, 3)
+
+## Grafo del ciclo de vida (nótese el lazo de permanencia)
+plot_life_cycle(B, shape = "circle", edgecol = "darkgreen")
+
+## Eigenanalisis de la Matriz de Lefkovitch
+eigs_B    <- eigen(B)
+dom_B     <- which.max(Re(eigs_B$values))
+lambda_B  <- Re(eigs_B$values[dom_B])
+
+w_B       <- Re(eigs_B$vectors[, dom_B])
+w_B_norm  <- w_B / sum(w_B)
+
+eigs_B_l  <- eigen(t(B))
+v_B       <- Re(eigs_B_l$vectors[, which.max(Re(eigs_B_l$values))])
+v_B_norm  <- v_B / v_B[1]
+
+lambda2_B <- sort(Mod(eigs_B$values), decreasing = TRUE)[2]
+rho_B     <- lambda_B / lambda2_B
+
+cat("lambda1 (planta perenne):", round(lambda_B, 4), "\n")
+cat("r equivalente:           ", round(log(lambda_B), 4), "por ano\n")
+cat("rho (amortiguamiento):   ", round(rho_B, 4), "\n\n")
+
+data.frame(
+  Etapa          = etapas,
+  w_estable      = round(w_B_norm, 4),
+  v_reproductivo = round(v_B_norm, 4)
+)
+
+## Elasticidad de la Matriz de Lefkovitch
+E_B <- elas(B, eval = "max")
+
+as.data.frame(E_B) %>%
+  setNames(etapas) %>%
+  mutate(Origen = etapas) %>%
+  pivot_longer(cols = -Origen, names_to = "Destino", values_to = "Elasticidad") %>%
+  ggplot(aes(x = Destino, y = Origen, fill = Elasticidad)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(Elasticidad, 3)), size = 4.5) +
+  scale_fill_gradient(low = "white", high = "darkgreen") +
+  labs(title = "Elasticidad (Lefkovitch - planta perenne)",
+       x = "Etapa destino", y = "Etapa origen") +
+  theme_minimal(base_size = 12)
+
+cat("Suma de elasticidades:", round(sum(E_B), 6))
+
+
+## ---- 10. EJERCICIO: VULPES VULPES ---------------------------------------
+
+## Dos matrices para Vulpes vulpes en Australia (COMADRE).
+## Fuente: Devenish-Nelson et al. (2013), Oikos. IDs: 249920 y 249921.
+
+clases_v <- c("0+", "1+", "2+", ">=3")
+
+vulpes_haunt <- matrix(
+  c(0.370, 0.610, 1.210, 1.580,
+    0.300, 0.000, 0.000, 0.000,
+    0.000, 0.350, 0.000, 0.000,
+    0.000, 0.000, 0.570, 0.700),
+  nrow = 4, ncol = 4, byrow = TRUE,
+  dimnames = list(clases_v, clases_v)
+)
+
+vulpes_unman <- matrix(
+  c(0.686, 1.271, 1.426, 0.332,
+    0.390, 0.000, 0.000, 0.000,
+    0.000, 0.650, 0.000, 0.000,
+    0.000, 0.000, 0.920, 0.180),
+  nrow = 4, ncol = 4, byrow = TRUE,
+  dimnames = list(clases_v, clases_v)
+)
+
+## Funcion auxiliar: eigenanalisis completo en un solo objeto
+calc_eigen_completo <- function(mat) {
+  eig   <- eigen(mat)
+  dpos  <- which.max(Re(eig$values))
+  lam   <- Re(eig$values[dpos])
+  w_raw <- Re(eig$vectors[, dpos])
+  eig_l <- eigen(t(mat))
+  v_raw <- Re(eig_l$vectors[, which.max(Re(eig_l$values))])
+  list(
+    lambda = lam,
+    w      = w_raw / sum(w_raw),
+    v      = v_raw / v_raw[1],
+    rho    = lam / sort(Mod(eig$values), decreasing = TRUE)[2]
+  )
+}
+
+res_haunt <- calc_eigen_completo(vulpes_haunt)
+res_unman <- calc_eigen_completo(vulpes_unman)
+
+## Comparacion de parametros demograficos
+data.frame(
+  Parametro = c("lambda1", "r", "rho"),
+  Caza      = c(round(res_haunt$lambda, 4),
+                round(log(res_haunt$lambda), 4),
+                round(res_haunt$rho, 4)),
+  Control   = c(round(res_unman$lambda, 4),
+                round(log(res_unman$lambda), 4),
+                round(res_unman$rho, 4))
+)
+
+## Distribucion estable y valor reproductivo
+data.frame(
+  Clase   = clases_v,
+  w_haunt = round(res_haunt$w, 4),
+  w_unman = round(res_unman$w, 4),
+  v_haunt = round(res_haunt$v, 4),
+  v_unman = round(res_unman$v, 4)
+)
+
+## Grafos del ciclo de vida
+par(mfrow = c(1, 2))
+plot_life_cycle(vulpes_haunt, shape = "circle", edgecol = "firebrick")
+title(main = "Caza intensa", cex.main = 1.2)
+plot_life_cycle(vulpes_unman, shape = "circle", edgecol = "steelblue")
+title(main = "Control", cex.main = 1.2)
+par(mfrow = c(1, 1))
+
+## Proyeccion a 20 anos
+N0_v    <- c(100, 50, 20, 10)
+years_v <- 20
+
+Nh <- proyectar(vulpes_haunt, N0_v, years_v)
+Nu <- proyectar(vulpes_unman, N0_v, years_v)
+
+data.frame(
+  Ano          = 0:years_v,
+  Caza_intensa = colSums(Nh),
+  Control      = colSums(Nu)
+) %>%
+  pivot_longer(cols = -Ano, names_to = "Tratamiento", values_to = "N_total") %>%
+  ggplot(aes(x = Ano, y = N_total, color = Tratamiento)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("Caza_intensa" = "firebrick", "Control" = "steelblue")) +
+  labs(title = "Vulpes vulpes - Proyeccion a 20 anos",
+       x = "Ano", y = "Abundancia total (N)") +
+  theme_classic(base_size = 13)
+
+## Elasticidades comparativas
+plot_elas <- function(E, titulo, clases) {
+  as.data.frame(E) %>%
+    setNames(clases) %>%
+    mutate(Origen = clases) %>%
+    pivot_longer(cols = -Origen, names_to = "Destino", values_to = "Elasticidad") %>%
+    ggplot(aes(x = Destino, y = Origen, fill = Elasticidad)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = round(Elasticidad, 3)), size = 4) +
+    scale_fill_gradient(low = "white", high = "coral3") +
+    labs(title = titulo, x = "Clase destino", y = "Clase origen") +
+    theme_minimal(base_size = 11)
+}
+
+E_haunt <- elas(vulpes_haunt, eval = "max")
+E_unman <- elas(vulpes_unman, eval = "max")
+
+print(plot_elas(E_haunt, "Elasticidad - Caza intensa", clases_v))
+print(plot_elas(E_unman, "Elasticidad - Control",      clases_v))
+
+
+## ---- 11. LTRE (Life Table Response Experiment) --------------------------
+
+## Descompone la diferencia en lambda entre dos poblaciones en contribuciones
+## por elemento de la matriz.
+## Referencia: matriz promedio de las dos poblaciones.
+## Contribucion de a_ij: c_ij = (a_ij_haunt - a_ij_unman) * s_ij_referencia
+
+A_ref  <- (vulpes_haunt + vulpes_unman) / 2
+S_ref  <- sens(A_ref, eval = "max")
+C_ltre <- (vulpes_haunt - vulpes_unman) * S_ref
+
+cat("Diferencia observada en lambda (haunt - unman):",
+    round(res_haunt$lambda - res_unman$lambda, 6), "\n")
+cat("Suma de contribuciones LTRE:                  ",
+    round(sum(C_ltre), 6), "\n")
+
+as.data.frame(C_ltre) %>%
+  setNames(clases_v) %>%
+  mutate(Origen = clases_v) %>%
+  pivot_longer(cols = -Origen, names_to = "Destino", values_to = "Contribucion") %>%
+  ggplot(aes(x = Destino, y = Origen, fill = Contribucion)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(Contribucion, 3)), size = 4) +
+  scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick", midpoint = 0) +
+  labs(
+    title    = "Contribuciones LTRE a Delta-lambda (haunt - unman)",
+    subtitle = "Rojo: la caza aumenta lambda | Azul: la caza disminuye lambda",
+    x        = "Clase destino",
+    y        = "Clase origen"
+  ) +
+  theme_minimal(base_size = 12)
+
+
+## ---- 12. BONUS: GORILLA GORILLA -----------------------------------------
+
+## Tabla de vida para Gorilla gorilla.
+## Tarea: calcular R0, T, r; construir Matriz de Leslie; eigenanalisis completo;
+## sensibilidad y elasticidad. Comparar con los resultados de Vulpes vulpes.
 
 Gorilla <- read_xlsx("Gorilla_lt.xlsx", sheet = "Hoja1")
+Gorilla
 
+## Su analisis aqui:
+
+
+## ---- SESSION INFO -------------------------------------------------------
+sessionInfo()
